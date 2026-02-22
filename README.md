@@ -103,6 +103,9 @@ Base URL: `http://localhost:4000/api`
   - `GET /caregiver/audit`
 - Prediction
   - `POST /predict-risk`
+- Assistant (Featherless-backed)
+  - `POST /assistant/coach-plan`
+  - `POST /assistant/chat`
 - Notifications
   - `GET /notifications`
   - `POST /notifications/:notificationId/ack`
@@ -121,6 +124,22 @@ Base URL: `http://localhost:4000/api`
 4. Open:
    - Frontend: `http://localhost:3000`
    - Backend health: `http://localhost:4000/api/health`
+
+## Featherless AI Setup
+
+Set these in `backend/.env`:
+
+- `FEATHERLESS_API_URL=https://api.featherless.ai/v1/chat/completions`
+- `FEATHERLESS_API_KEY=<your-key>`
+- `FEATHERLESS_MODEL=deepseek-ai/DeepSeek-V3-0324`
+- `FEATHERLESS_TIMEOUT_MS=25000`
+
+If key/model are missing or unavailable, assistant endpoints fall back to deterministic local guidance.
+
+Patient wellness pages:
+
+- `/patient/coaching` for Diet & Lifestyle Coaching
+- `/patient/assistant` for Virtual Assistant workflows
 
 ## Login Troubleshooting (`Failed to fetch`)
 

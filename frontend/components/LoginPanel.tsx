@@ -111,10 +111,22 @@ export function LoginPanel() {
             </label>
             <label>
               Role
-              <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
-                <option value="Patient">Patient</option>
-                <option value="Caregiver">Caregiver</option>
-              </select>
+              <div className="role-choice-row">
+                <button
+                  type="button"
+                  className={role === "Patient" ? "choice-chip active" : "choice-chip"}
+                  onClick={() => setRole("Patient")}
+                >
+                  Patient
+                </button>
+                <button
+                  type="button"
+                  className={role === "Caregiver" ? "choice-chip active" : "choice-chip"}
+                  onClick={() => setRole("Caregiver")}
+                >
+                  Caregiver
+                </button>
+              </div>
             </label>
           </>
         ) : null}

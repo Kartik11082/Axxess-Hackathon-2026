@@ -8,6 +8,7 @@ import { prisma } from "./db/prisma";
 import { initializePersistentMappings } from "./db/persistentMappings";
 import { initializePersistentUsers } from "./db/persistentUsers";
 import { StreamingEngine } from "./engine/streamingEngine";
+import { liveAlertService } from "./services/liveAlertService";
 
 const app = express();
 const server = http.createServer(app);
@@ -39,6 +40,7 @@ async function startServer(): Promise<void> {
   await initializePersistentUsers();
   await initializePersistentMappings();
   await initializePersistentDomainData();
+  liveAlertService.start();
   streamingEngine.start();
 
   server.listen(config.port, () => {
@@ -57,6 +59,7 @@ startServer().catch((error) => {
 
 process.on("SIGINT", async () => {
   streamingEngine.stop();
+  liveAlertService.stop();
   await prisma?.$disconnect().catch(() => undefined);
   server.close(() => process.exit(0));
 });

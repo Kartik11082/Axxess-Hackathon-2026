@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { WS_URL } from "./config";
-import { PredictionResponse, StreamingVitals } from "./types";
+import { API_BASE_URL, WS_URL } from "./config";
+import { AlertStreamEvent, PredictionResponse, StreamingVitals } from "./types";
 
 export function useInactivityLogout(onLogout: () => void, timeoutMs = 10 * 60 * 1000): void {
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -109,6 +109,144 @@ export function useVitalsSocket(params: UseVitalsSocketParams): { connected: boo
       socket.close();
     };
   }, [stablePatientId, stableToken]);
+
+  return { connected, statusText };
+}
+
+interface UseAlertStreamParams {
+  token: string | null;
+  onEvent: (event: AlertStreamEvent) => void;
+}
+
+function parseSseBlock(block: string): { eventName: string; data: string | null } {
+  const lines = block.split("\n");
+  let eventName = "message";
+  const dataLines: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      eventName = line.slice("event:".length).trim();
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trimStart());
+    }
+  }
+
+  return {
+    eventName,
+    data: dataLines.length > 0 ? dataLines.join("\n") : null
+  };
+}
+
+export function useAlertStream(params: UseAlertStreamParams): { connected: boolean; statusText: string } {
+  const [connected, setConnected] = useState(false);
+  const [statusText, setStatusText] = useState("Alert stream idle");
+  const onEventRef = useRef(params.onEvent);
+  const retryRef = useRef<NodeJS.Timeout | null>(null);
+
+  const stableToken = useMemo(() => params.token, [params.token]);
+
+  useEffect(() => {
+    onEventRef.current = params.onEvent;
+  }, [params.onEvent]);
+
+  useEffect(() => {
+    if (!stableToken) {
+      setConnected(false);
+      setStatusText("No session token");
+      return;
+    }
+
+    const abortController = new AbortController();
+    let isCancelled = false;
+
+    const connect = async () => {
+      setStatusText("Connecting alert stream...");
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/stream`, {
+          method: "GET",
+          headers: {
+            Accept: "text/event-stream",
+            Authorization: `Bearer ${stableToken}`
+          },
+          cache: "no-store",
+          signal: abortController.signal
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error(`Alert stream request failed (${response.status})`);
+        }
+
+        setConnected(true);
+        setStatusText("Alert stream connected");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (!isCancelled) {
+          const chunk = await reader.read();
+          if (chunk.done) {
+            break;
+          }
+          buffer += decoder.decode(chunk.value, { stream: true });
+
+          let separatorIndex = buffer.indexOf("\n\n");
+          while (separatorIndex >= 0) {
+            const rawBlock = buffer.slice(0, separatorIndex);
+            buffer = buffer.slice(separatorIndex + 2);
+            separatorIndex = buffer.indexOf("\n\n");
+
+            const parsed = parseSseBlock(rawBlock);
+            if (!parsed.data) {
+              continue;
+            }
+
+            try {
+              const payload = JSON.parse(parsed.data) as AlertStreamEvent;
+              if (!payload || typeof payload !== "object" || !("type" in payload)) {
+                continue;
+              }
+              onEventRef.current(payload);
+            } catch {
+              continue;
+            }
+          }
+        }
+
+        if (!isCancelled) {
+          setConnected(false);
+          setStatusText("Alert stream disconnected");
+          retryRef.current = setTimeout(() => {
+            void connect();
+          }, 3000);
+        }
+      } catch {
+        if (!isCancelled) {
+          setConnected(false);
+          setStatusText("Alert stream error, retrying...");
+          retryRef.current = setTimeout(() => {
+            void connect();
+          }, 3000);
+        }
+      }
+    };
+
+    void connect();
+
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+      if (retryRef.current) {
+        clearTimeout(retryRef.current);
+      }
+    };
+  }, [stableToken]);
 
   return { connected, statusText };
 }

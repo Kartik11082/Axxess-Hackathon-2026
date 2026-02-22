@@ -4,15 +4,21 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
-import { useInactivityLogout, useVitalsSocket } from "@/lib/hooks";
+import { useAlertStream, useInactivityLogout, useVitalsSocket } from "@/lib/hooks";
 import {
+  CaregiverAlertAction,
   CaregiverPriorityItem,
+  HeartRatePredictionResponse,
+  LiveAlert,
+  MockHeartRateInputPayload,
   NotificationItem,
   PredictionResponse,
   StreamingVitals
 } from "@/lib/types";
 import { AppHeader } from "./AppHeader";
+import { CaregiverAlertFeed } from "./CaregiverAlertFeed";
 import { CaregiverPriorityTable } from "./CaregiverPriorityTable";
+import { HeartRateForecastPanel } from "./HeartRateForecastPanel";
 import { LiveVitalsChart } from "./LiveVitalsChart";
 import { NotificationPanel } from "./NotificationPanel";
 import { PredictionInsights } from "./PredictionInsights";
@@ -46,6 +52,26 @@ interface InsuranceResponse {
   coverageCompatibility: string;
 }
 
+function upsertLiveAlert(current: LiveAlert[], incoming: LiveAlert): LiveAlert[] {
+  const existingIndex = current.findIndex((item) => item.id === incoming.id);
+  if (existingIndex < 0) {
+    return [incoming, ...current];
+  }
+  const next = [...current];
+  next[existingIndex] = incoming;
+  return next;
+}
+
+function sortLiveAlerts(left: LiveAlert, right: LiveAlert): number {
+  if (left.tier !== right.tier) {
+    return right.tier - left.tier;
+  }
+  if (left.urgencyLevel !== right.urgencyLevel) {
+    return right.urgencyLevel - left.urgencyLevel;
+  }
+  return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+}
+
 export function CaregiverDashboard() {
   const router = useRouter();
   const [caregiverName, setCaregiverName] = useState("Caregiver");
@@ -55,9 +81,12 @@ export function CaregiverDashboard() {
   const [selectedPatientName, setSelectedPatientName] = useState<string>("Patient");
   const [vitals, setVitals] = useState<StreamingVitals[]>([]);
   const [prediction, setPrediction] = useState<PredictionResponse | null>(null);
+  const [heartRatePrediction, setHeartRatePrediction] = useState<HeartRatePredictionResponse | null>(null);
+  const [mockInputPayload, setMockInputPayload] = useState<MockHeartRateInputPayload | null>(null);
   const [predictionHistory, setPredictionHistory] = useState<Array<{ timestamp: string; riskScore: number }>>([]);
   const [insurance, setInsurance] = useState<InsuranceResponse | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [liveAlerts, setLiveAlerts] = useState<LiveAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string | null>(null);
 
@@ -75,7 +104,10 @@ export function CaregiverDashboard() {
   const loadPatientDetails = useCallback(async (patientId: string) => {
     const detail = await apiRequest<CaregiverPatientDetailResponse>(`/api/caregiver/patients/${patientId}`);
     setSelectedPatientName(detail.patient.name);
-    setVitals(detail.latestVitals ? [detail.latestVitals] : []);
+    const latestVitals = detail.latestVitals ? [detail.latestVitals] : [];
+    setVitals(latestVitals);
+    setHeartRatePrediction(null);
+    setMockInputPayload(null);
     setPrediction(detail.latestPrediction ?? null);
     setPredictionHistory(
       detail.predictions.map((point) => ({
@@ -162,6 +194,49 @@ export function CaregiverDashboard() {
     }
   });
 
+  const { statusText: alertStreamStatus } = useAlertStream({
+    token,
+    onEvent: (event) => {
+      if (event.type === "init") {
+        setLiveAlerts(event.alerts);
+        return;
+      }
+      if (event.type === "alert_upsert") {
+        setLiveAlerts((current) => upsertLiveAlert(current, event.alert));
+        return;
+      }
+      if (event.type === "alert_resolved") {
+        setLiveAlerts((current) => upsertLiveAlert(current, event.alert));
+      }
+    }
+  });
+
+  useEffect(() => {
+    if (!selectedPatientId) {
+      return;
+    }
+
+    const runCycle = () => {
+      apiRequest<MockHeartRateInputPayload>(`/api/ml/mock-input/${selectedPatientId}?horizon=6&window=24`)
+        .then((mockPayload) => {
+          setMockInputPayload(mockPayload);
+          return apiRequest<HeartRatePredictionResponse>("/api/ml/predict-heart-rate", {
+            method: "POST",
+            body: JSON.stringify(mockPayload)
+          });
+        })
+        .then((response) => {
+          setHeartRatePrediction(response);
+        })
+        .catch(() => undefined);
+    };
+
+    runCycle();
+    const interval = setInterval(runCycle, 20_000);
+
+    return () => clearInterval(interval);
+  }, [selectedPatientId]);
+
   const onSelectPatient = useCallback(
     async (patientId: string) => {
       setSelectedPatientId(patientId);
@@ -176,28 +251,63 @@ export function CaregiverDashboard() {
     setNotifications(alerts.notifications);
   }, []);
 
+  const onCaregiverAction = useCallback(
+    async (alertId: string, action: Exclude<CaregiverAlertAction, "bulk_acknowledge">, note?: string) => {
+      await apiRequest<{ alert: LiveAlert }>("/api/stream/action", {
+        method: "POST",
+        body: JSON.stringify({
+          alertId,
+          action,
+          note
+        })
+      });
+    },
+    []
+  );
+
+  const onBulkAcknowledge = useCallback(async (tier?: 1 | 2 | 3) => {
+    await apiRequest<{ acknowledgedCount: number; alertIds: string[] }>("/api/stream/bulk-acknowledge", {
+      method: "POST",
+      body: JSON.stringify(tier ? { tier } : {})
+    });
+  }, []);
+
   if (loading) {
     return <div className="full-center">Loading caregiver command center...</div>;
   }
+
+  const activeLiveAlerts = [...liveAlerts]
+    .filter((alert) => alert.state !== "RESOLVED")
+    .sort(sortLiveAlerts);
 
   return (
     <div className="dashboard-wrap">
       <AppHeader
         title={`${caregiverName} Command Center`}
         subtitle="Caregiver Operations Layer"
-        status={selectedPatientId ? `Monitoring ${selectedPatientName}` : "No active patient selected"}
+        status={
+          selectedPatientId
+            ? `Monitoring ${selectedPatientName} | ${alertStreamStatus}`
+            : `No active patient selected | ${alertStreamStatus}`
+        }
         userId={caregiverId}
         showAddPatientControl
         onPatientMapped={onPatientMapped}
       />
 
       <section className="dashboard-grid single-column">
+        <CaregiverAlertFeed alerts={activeLiveAlerts} onAction={onCaregiverAction} onBulkAcknowledge={onBulkAcknowledge} />
         <CaregiverPriorityTable rows={prioritized} onSelectPatient={onSelectPatient} />
       </section>
 
       <section className="dashboard-grid two-column">
         <div className="column">
-          <LiveVitalsChart vitals={vitals} />
+          <LiveVitalsChart
+            vitals={vitals}
+            heartRateForecast={heartRatePrediction?.predictedHeartRates ?? []}
+            forecastConfidence={heartRatePrediction?.confidence}
+          />
+          <HeartRateForecastPanel prediction={heartRatePrediction} inputPayload={mockInputPayload} />
           <NotificationPanel notifications={notifications} onAcknowledge={onAcknowledge} />
         </div>
         <div className="column">

@@ -14,20 +14,48 @@ import { StreamingVitals } from "@/lib/types";
 
 interface LiveVitalsChartProps {
   vitals: StreamingVitals[];
+  heartRateForecast?: number[];
+  forecastConfidence?: number;
 }
 
-export function LiveVitalsChart({ vitals }: LiveVitalsChartProps) {
-  const data = vitals.slice(-24).map((item) => ({
-    time: new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    heartRate: item.heartRate,
+export function LiveVitalsChart({ vitals, heartRateForecast = [], forecastConfidence }: LiveVitalsChartProps) {
+  const observed = vitals.slice(-24).map((item) => ({
+    label: new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    observedHeartRate: item.heartRate,
+    predictedHeartRate: null as number | null,
     bloodOxygen: item.bloodOxygen,
     sleepScore: item.sleepScore
   }));
+
+  const forecast = heartRateForecast.slice(0, 12).map((value, index) => ({
+    label: `F+${index + 1}`,
+    observedHeartRate: null as number | null,
+    predictedHeartRate: value,
+    bloodOxygen: null as number | null,
+    sleepScore: null as number | null
+  }));
+
+  if (observed.length > 0 && forecast.length > 0) {
+    const latestObserved = observed[observed.length - 1];
+    forecast.unshift({
+      label: "Now",
+      observedHeartRate: null,
+      predictedHeartRate: latestObserved.observedHeartRate,
+      bloodOxygen: null,
+      sleepScore: null
+    });
+  }
+
+  const data = [...observed, ...forecast];
 
   return (
     <div className="card chart-card">
       <div className="card-header">
         <span className="live-badge">LIVE DATA</span>
+        {heartRateForecast.length > 0 ? <span className="predicted-badge">PREDICTED HR</span> : null}
+        {typeof forecastConfidence === "number" ? (
+          <span className="confidence-badge">Forecast confidence: {Math.round(forecastConfidence * 100)}%</span>
+        ) : null}
         <p className="timestamp-label">
           Last update: {vitals.length ? new Date(vitals[vitals.length - 1].timestamp).toLocaleTimeString() : "Waiting"}
         </p>
@@ -36,18 +64,29 @@ export function LiveVitalsChart({ vitals }: LiveVitalsChartProps) {
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-          <XAxis dataKey="time" stroke="#9fb4cc" />
+          <XAxis dataKey="label" stroke="#9fb4cc" />
           <YAxis stroke="#9fb4cc" />
           <Tooltip />
           <Legend />
           <Line
             type="monotone"
-            dataKey="heartRate"
+            dataKey="observedHeartRate"
             stroke="#42a5f5"
             strokeWidth={3}
             dot={false}
             isAnimationActive
-            name="Heart Rate"
+            name="Heart Rate (Observed)"
+          />
+          <Line
+            type="monotone"
+            dataKey="predictedHeartRate"
+            stroke="#ff5ea8"
+            strokeWidth={2.8}
+            strokeDasharray="7 5"
+            dot={false}
+            connectNulls
+            isAnimationActive
+            name="Heart Rate (Predicted)"
           />
           <Line
             type="monotone"

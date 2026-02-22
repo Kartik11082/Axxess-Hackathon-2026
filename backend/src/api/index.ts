@@ -6,6 +6,9 @@ import { caregiverRoutes } from "./caregiverRoutes";
 import { predictionRoutes } from "./predictionRoutes";
 import { notificationRoutes } from "./notificationRoutes";
 import { insuranceRoutes } from "./insuranceRoutes";
+import { mlRoutes } from "./mlRoutes";
+import { streamRoutes } from "./streamRoutes";
+import { assistantRoutes } from "./assistantRoutes";
 
 export const apiRouter = Router();
 
@@ -44,5 +47,8 @@ apiRouter.use("/onboarding", onboardingRoutes);
 apiRouter.use("/patients", patientRoutes);
 apiRouter.use("/caregiver", caregiverRoutes);
 apiRouter.use("/", predictionRoutes);
+apiRouter.use("/ml", mlRoutes);
 apiRouter.use("/notifications", notificationRoutes);
+apiRouter.use("/stream", streamRoutes);
 apiRouter.use("/insurance", insuranceRoutes);
+apiRouter.use("/assistant", assistantRoutes);

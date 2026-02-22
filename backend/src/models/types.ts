@@ -160,6 +160,48 @@ export interface NotificationItem {
   acknowledged: boolean;
 }
 
+export type AlertTier = 1 | 2 | 3;
+export type LiveAlertState = "FIRED" | "AWAITING_ACK" | "ESCALATED" | "BEING_REVIEWED" | "RESOLVED";
+export type CaregiverAlertAction = "acknowledge" | "call_patient" | "alert_staff" | "dismiss" | "bulk_acknowledge";
+
+export interface LiveAlert {
+  id: string;
+  patientId: string;
+  patientName: string;
+  tier: AlertTier;
+  severity: "info" | "warning" | "critical";
+  state: LiveAlertState;
+  riskPoints: number;
+  urgencyLevel: number;
+  title: string;
+  message: string;
+  flaggedVitals: string[];
+  topContributors: string[];
+  firedAt: string;
+  updatedAt: string;
+  acknowledgedAt?: string;
+  resolvedAt?: string;
+  stateDeadlineAt?: string;
+}
+
+export interface AlertAuditEntry {
+  id: string;
+  alertId: string;
+  patientId: string;
+  actorUserId: string;
+  actorRole: Role | "System";
+  action: CaregiverAlertAction | "acknowledge";
+  timestamp: string;
+  responseTimeMs: number;
+  note?: string;
+}
+
+export interface AlertAuditSummary {
+  totalActions: number;
+  averageResponseMs: number | null;
+  lastActionAt?: string;
+}
+
 export interface OutboundNotification {
   id: string;
   patientId: string;
@@ -210,4 +252,68 @@ export interface OnboardingStatus {
   role: Role;
   onboardingCompleted: boolean;
   nextPath: string;
+}
+
+export type AssistantIntent = "triage" | "reminder" | "scheduling" | "general";
+export type AssistantUrgency = "low" | "moderate" | "high";
+
+export interface CoachingPlanItem {
+  title: string;
+  rationale: string;
+  actions: string[];
+}
+
+export interface CoachingGoal {
+  metric: string;
+  target: string;
+  window: string;
+  why: string;
+}
+
+export interface CoachingPlanResponse {
+  patientId: string;
+  generatedAt: string;
+  source: "llm" | "fallback";
+  summary: string;
+  sections: {
+    nutrition: CoachingPlanItem[];
+    activity: CoachingPlanItem[];
+    recovery: CoachingPlanItem[];
+    monitoring: CoachingPlanItem[];
+  };
+  goals: CoachingGoal[];
+  cautions: string[];
+  disclaimer: string;
+}
+
+export interface AssistantReminder {
+  task: string;
+  when: string;
+  frequency: string;
+}
+
+export interface AssistantAppointment {
+  specialty: string;
+  timeframe: string;
+  reason: string;
+}
+
+export interface AssistantReply {
+  intent: AssistantIntent;
+  urgency: AssistantUrgency;
+  title: string;
+  overview: string;
+  bullets: string[];
+  nextSteps: string[];
+  reminder?: AssistantReminder;
+  appointment?: AssistantAppointment;
+  redFlags: string[];
+  disclaimer: string;
+}
+
+export interface AssistantChatResponse {
+  patientId: string;
+  generatedAt: string;
+  source: "llm" | "fallback";
+  reply: AssistantReply;
 }

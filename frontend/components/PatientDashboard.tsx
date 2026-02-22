@@ -4,9 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest } from "@/lib/api";
 import { clearSession, getToken, getUser } from "@/lib/auth";
-import { useInactivityLogout, useVitalsSocket } from "@/lib/hooks";
-import { NotificationItem, PredictionResponse, StreamingVitals } from "@/lib/types";
+import { useAlertStream, useInactivityLogout, useVitalsSocket } from "@/lib/hooks";
+import {
+  LiveAlert,
+  HeartRatePredictionResponse,
+  MockHeartRateInputPayload,
+  NotificationItem,
+  PredictionResponse,
+  StreamingVitals
+} from "@/lib/types";
+import { AlertOverlay } from "./AlertOverlay";
+import { AlertToastStack } from "./AlertToastStack";
 import { AppHeader } from "./AppHeader";
+import { HeartRateForecastPanel } from "./HeartRateForecastPanel";
 import { LiveVitalsChart } from "./LiveVitalsChart";
 import { NotificationPanel } from "./NotificationPanel";
 import { PredictionInsights } from "./PredictionInsights";
@@ -36,14 +46,37 @@ interface InsuranceResponse {
   coverageCompatibility: string;
 }
 
+function upsertLiveAlert(current: LiveAlert[], incoming: LiveAlert): LiveAlert[] {
+  const existingIndex = current.findIndex((item) => item.id === incoming.id);
+  if (existingIndex < 0) {
+    return [incoming, ...current];
+  }
+  const next = [...current];
+  next[existingIndex] = incoming;
+  return next;
+}
+
+function sortLiveAlerts(left: LiveAlert, right: LiveAlert): number {
+  if (left.tier !== right.tier) {
+    return right.tier - left.tier;
+  }
+  if (left.urgencyLevel !== right.urgencyLevel) {
+    return right.urgencyLevel - left.urgencyLevel;
+  }
+  return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+}
+
 export function PatientDashboard() {
   const router = useRouter();
   const [patientId, setPatientId] = useState<string>("");
   const [patientName, setPatientName] = useState<string>("Patient");
   const [vitals, setVitals] = useState<StreamingVitals[]>([]);
   const [prediction, setPrediction] = useState<PredictionResponse | null>(null);
+  const [heartRatePrediction, setHeartRatePrediction] = useState<HeartRatePredictionResponse | null>(null);
+  const [mockInputPayload, setMockInputPayload] = useState<MockHeartRateInputPayload | null>(null);
   const [predictionHistory, setPredictionHistory] = useState<Array<{ timestamp: string; riskScore: number }>>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [liveAlerts, setLiveAlerts] = useState<LiveAlert[]>([]);
   const [insurance, setInsurance] = useState<InsuranceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string | null>(null);
@@ -130,6 +163,23 @@ export function PatientDashboard() {
     }
   });
 
+  const { statusText: alertStreamStatus } = useAlertStream({
+    token,
+    onEvent: (event) => {
+      if (event.type === "init") {
+        setLiveAlerts(event.alerts);
+        return;
+      }
+      if (event.type === "alert_upsert") {
+        setLiveAlerts((current) => upsertLiveAlert(current, event.alert));
+        return;
+      }
+      if (event.type === "alert_resolved") {
+        setLiveAlerts((current) => upsertLiveAlert(current, event.alert));
+      }
+    }
+  });
+
   useEffect(() => {
     vitalsRef.current = vitals;
   }, [vitals]);
@@ -139,7 +189,7 @@ export function PatientDashboard() {
       return;
     }
 
-    const interval = setInterval(() => {
+    const runCycle = () => {
       const samples = vitalsRef.current.slice(-20);
       if (samples.length < 6) {
         return;
@@ -159,7 +209,23 @@ export function PatientDashboard() {
           ]);
         })
         .catch(() => undefined);
-    }, 20_000);
+
+      apiRequest<MockHeartRateInputPayload>(`/api/ml/mock-input/${patientId}?horizon=6&window=24`)
+        .then((mockPayload) => {
+          setMockInputPayload(mockPayload);
+          return apiRequest<HeartRatePredictionResponse>("/api/ml/predict-heart-rate", {
+            method: "POST",
+            body: JSON.stringify(mockPayload)
+          });
+        })
+        .then((response) => {
+          setHeartRatePrediction(response);
+        })
+        .catch(() => undefined);
+    };
+
+    runCycle();
+    const interval = setInterval(runCycle, 20_000);
 
     return () => clearInterval(interval);
   }, [patientId]);
@@ -169,15 +235,48 @@ export function PatientDashboard() {
   }
 
   const latestVitals = vitals[vitals.length - 1];
+  const activeLiveAlerts = liveAlerts.filter((alert) => alert.state !== "RESOLVED");
+  const overlayAlert =
+    [...activeLiveAlerts]
+      .filter((alert) => (alert.tier === 3 || alert.state === "ESCALATED") && alert.state !== "BEING_REVIEWED")
+      .sort(sortLiveAlerts)[0] ?? null;
+  const toastAlerts = [...activeLiveAlerts]
+    .filter((alert) => alert.tier <= 2 && alert.state !== "BEING_REVIEWED")
+    .sort(sortLiveAlerts)
+    .slice(0, 5);
+
+  const onAcknowledgeLiveAlert = async (alertId: string, reason?: string) => {
+    await apiRequest<{ alert: LiveAlert }>("/api/stream/acknowledge", {
+      method: "POST",
+      body: JSON.stringify({
+        alertId,
+        reason
+      })
+    });
+  };
+
+  const onEmergencyAction = async (alertId: string) => {
+    await apiRequest<{ alert: LiveAlert }>("/api/stream/acknowledge", {
+      method: "POST",
+      body: JSON.stringify({
+        alertId,
+        reason: "emergency-requested"
+      })
+    });
+  };
 
   return (
     <div className="dashboard-wrap">
       <AppHeader
         title={`${patientName} Monitoring Console`}
         subtitle="Patient Experience Layer"
-        status={latestVitals ? "Streaming active" : "Awaiting stream"}
+        status={latestVitals ? `Streaming active | ${alertStreamStatus}` : "Awaiting stream"}
         userId={patientId}
+        showWellnessNav
       />
+
+      <AlertOverlay alert={overlayAlert} onAcknowledge={onAcknowledgeLiveAlert} onEmergency={onEmergencyAction} />
+      <AlertToastStack alerts={toastAlerts} onAcknowledge={onAcknowledgeLiveAlert} />
 
       <section className="risk-headline">
         <div>
@@ -200,7 +299,12 @@ export function PatientDashboard() {
 
       <section className="dashboard-grid two-column">
         <div className="column">
-          <LiveVitalsChart vitals={vitals} />
+          <LiveVitalsChart
+            vitals={vitals}
+            heartRateForecast={heartRatePrediction?.predictedHeartRates ?? []}
+            forecastConfidence={heartRatePrediction?.confidence}
+          />
+          <HeartRateForecastPanel prediction={heartRatePrediction} inputPayload={mockInputPayload} />
           <NotificationPanel notifications={notifications} onAcknowledge={onAcknowledge} />
         </div>
         <div className="column">

@@ -54,6 +54,28 @@ export interface PredictionResponse {
   icdCode: string;
 }
 
+export interface HeartRatePredictionResponse {
+  patientId: string;
+  horizon: number;
+  predictedHeartRates: number[];
+  lowQuantile: number[];
+  highQuantile: number[];
+  confidence?: number;
+  model?: string;
+  configUsed?: string;
+  context?: number;
+  generatedAt: string;
+}
+
+export interface MockHeartRateInputPayload {
+  patientId: string;
+  heartRates: number[];
+  horizon: number;
+  generatedAt: string;
+  source: string;
+  windowSize: number;
+}
+
 export interface NotificationItem {
   id: string;
   userId: string;
@@ -63,6 +85,132 @@ export interface NotificationItem {
   title: string;
   message: string;
   acknowledged: boolean;
+}
+
+export type AlertTier = 1 | 2 | 3;
+export type LiveAlertState = "FIRED" | "AWAITING_ACK" | "ESCALATED" | "BEING_REVIEWED" | "RESOLVED";
+export type CaregiverAlertAction = "acknowledge" | "call_patient" | "alert_staff" | "dismiss";
+
+export interface LiveAlert {
+  id: string;
+  patientId: string;
+  patientName: string;
+  tier: AlertTier;
+  severity: "info" | "warning" | "critical";
+  state: LiveAlertState;
+  riskPoints: number;
+  urgencyLevel: number;
+  title: string;
+  message: string;
+  flaggedVitals: string[];
+  topContributors: string[];
+  firedAt: string;
+  updatedAt: string;
+  acknowledgedAt?: string;
+  resolvedAt?: string;
+  stateDeadlineAt?: string;
+}
+
+export interface AlertAuditEntry {
+  id: string;
+  alertId: string;
+  patientId: string;
+  actorUserId: string;
+  actorRole: Role | "System";
+  action: "acknowledge" | "call_patient" | "alert_staff" | "dismiss" | "bulk_acknowledge";
+  timestamp: string;
+  responseTimeMs: number;
+  note?: string;
+}
+
+export interface AlertAuditSummary {
+  totalActions: number;
+  averageResponseMs: number | null;
+  lastActionAt?: string;
+}
+
+export type AlertStreamEvent =
+  | {
+      type: "init";
+      alerts: LiveAlert[];
+      auditSummary: AlertAuditSummary;
+    }
+  | {
+      type: "alert_upsert";
+      alert: LiveAlert;
+    }
+  | {
+      type: "alert_resolved";
+      alert: LiveAlert;
+    }
+  | {
+      type: "audit";
+      entry: AlertAuditEntry;
+      summary: AlertAuditSummary;
+    };
+
+export type AssistantIntent = "triage" | "reminder" | "scheduling" | "general";
+export type AssistantUrgency = "low" | "moderate" | "high";
+
+export interface CoachingPlanItem {
+  title: string;
+  rationale: string;
+  actions: string[];
+}
+
+export interface CoachingGoal {
+  metric: string;
+  target: string;
+  window: string;
+  why: string;
+}
+
+export interface CoachingPlanResponse {
+  patientId: string;
+  generatedAt: string;
+  source: "llm" | "fallback";
+  summary: string;
+  sections: {
+    nutrition: CoachingPlanItem[];
+    activity: CoachingPlanItem[];
+    recovery: CoachingPlanItem[];
+    monitoring: CoachingPlanItem[];
+  };
+  goals: CoachingGoal[];
+  cautions: string[];
+  disclaimer: string;
+}
+
+export interface AssistantReminder {
+  task: string;
+  when: string;
+  frequency: string;
+}
+
+export interface AssistantAppointment {
+  specialty: string;
+  timeframe: string;
+  reason: string;
+}
+
+export interface AssistantReply {
+  intent: AssistantIntent;
+  urgency: AssistantUrgency;
+  title: string;
+  overview: string;
+  bullets: string[];
+  nextSteps: string[];
+  reminder?: AssistantReminder;
+  appointment?: AssistantAppointment;
+  redFlags: string[];
+  disclaimer: string;
+}
+
+export interface AssistantChatResponse {
+  patientId: string;
+  generatedAt: string;
+  source: "llm" | "fallback";
+  reply: AssistantReply;
 }
 
 export interface PatientSummary {

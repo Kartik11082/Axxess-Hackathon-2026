@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import { clearSession } from "@/lib/auth";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 interface AppHeaderProps {
   title: string;
@@ -11,6 +12,7 @@ interface AppHeaderProps {
   status: string;
   userId?: string;
   showAddPatientControl?: boolean;
+  showWellnessNav?: boolean;
   onPatientMapped?: () => Promise<void> | void;
 }
 
@@ -20,9 +22,11 @@ export function AppHeader({
   status,
   userId,
   showAddPatientControl = false,
+  showWellnessNav = false,
   onPatientMapped
 }: AppHeaderProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [copied, setCopied] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [patientIdInput, setPatientIdInput] = useState("");
@@ -86,6 +90,25 @@ export function AppHeader({
       </div>
       <div className="header-actions">
         <span className="status-chip">{status}</span>
+        {showWellnessNav ? (
+          <div className="header-link-row">
+            <Link href="/patient" className={`header-link-button ${pathname === "/patient" ? "active" : ""}`}>
+              Home
+            </Link>
+            <Link
+              href="/patient/coaching"
+              className={`header-link-button ${pathname?.startsWith("/patient/coaching") ? "active" : ""}`}
+            >
+              Coaching
+            </Link>
+            <Link
+              href="/patient/assistant"
+              className={`header-link-button ${pathname?.startsWith("/patient/assistant") ? "active" : ""}`}
+            >
+              Assistant
+            </Link>
+          </div>
+        ) : null}
         {userId ? (
           <button type="button" className="ghost id-button" onClick={copyUserId} title="Click to copy your user ID">
             {copied ? "Copied" : `ID: ${userId}`}
