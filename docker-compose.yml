@@ -1,0 +1,2 @@
+# SQLite is the default DB in this project.
+# Docker database services are not required for the current setup.

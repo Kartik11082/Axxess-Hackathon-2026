@@ -1,0 +1,295 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  Patient
+  Caregiver
+}
+
+enum PredictedDisease {
+  Cardiac
+  Diabetes
+  Stable
+}
+
+enum ActivityLevel {
+  Low
+  Moderate
+  High
+}
+
+enum LifeStage {
+  Early_adult
+  Mid_life
+  Senior
+}
+
+enum AlertPreference {
+  high_risk_only
+  all_alerts
+  emergency_only
+}
+
+enum NotificationSeverity {
+  info
+  warning
+  critical
+}
+
+enum NotificationChannel {
+  email
+  sms
+}
+
+enum RiskMomentum {
+  Increasing
+  Improving
+  Stable
+}
+
+enum ConsentType {
+  patient_onboarding
+  caregiver_onboarding
+}
+
+model User {
+  id                  String   @id
+  name                String
+  email               String   @unique
+  role                Role
+  onboardingCompleted Boolean  @default(false)
+  patientCode         String?  @unique
+  passwordHash        String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  patientProfile         PatientProfile?
+  caregiverProfile       CaregiverProfessionalProfile?
+  patientOnboardingDraft PatientOnboardingDraft?
+  caregiverOnboardingDraft CaregiverOnboardingDraft?
+  beneficiaries          Beneficiary[]               @relation("PatientBeneficiaries")
+  vitals                 StreamingVitals[]           @relation("PatientVitals")
+  predictionLogs         PredictionLog[]             @relation("PatientPredictionLogs")
+  notifications          NotificationItem[]          @relation("UserNotifications")
+  patientNotifications   NotificationItem[]          @relation("PatientNotificationTargets")
+  outboundNotifications  OutboundNotification[]      @relation("PatientOutboundNotifications")
+  auditLogs              AuditLogItem[]              @relation("ActorAuditLogs")
+  consentLogs            ConsentLogItem[]            @relation("UserConsentLogs")
+  caregiverMappings      CaregiverPatientMapping[]   @relation("CaregiverMappings")
+  patientMappings        CaregiverPatientMapping[]   @relation("PatientMappings")
+}
+
+model PatientProfile {
+  userId                       String   @id
+  user                         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferredName                String?
+  heightRange                  String?
+  activityLevel                ActivityLevel?
+  lifeStage                    LifeStage?
+  unusualThirst                Int?
+  wakeUpAtNight                Int?
+  breathlessDuringLightActivity Int?
+  fatigueAfterMeals            Int?
+  monitorHeartRateRegularly    Int?
+  onboardingResponses          Json?
+  insuranceProvider            String?
+  insuranceMemberIdEncrypted   String?
+  insuranceMemberIdMasked      String?
+  insuranceGroupNumberEncrypted String?
+  insuranceGroupNumberMasked   String?
+  predictedDisease             PredictedDisease @default(Stable)
+  initialRiskConfidence        String           @default("Low")
+  riskScore                    Float            @default(0)
+  wearableData                 Json?
+  insuranceId                  String?
+  insuranceIdMasked            String           @default("")
+  onboardingCompletedAt        DateTime?
+  createdAt                    DateTime         @default(now())
+  updatedAt                    DateTime         @updatedAt
+}
+
+model PatientOnboardingDraft {
+  userId                        String   @id
+  user                          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferredName                 String?
+  heightRange                   String?
+  activityLevel                 ActivityLevel?
+  lifeStage                     LifeStage?
+  unusualThirst                 Int?
+  wakeUpAtNight                 Int?
+  breathlessDuringLightActivity Int?
+  fatigueAfterMeals             Int?
+  monitorHeartRateRegularly     Int?
+  insuranceProvider             String?
+  insuranceMemberIdEncrypted    String?
+  insuranceMemberIdMasked       String?
+  insuranceGroupNumberEncrypted String?
+  insuranceGroupNumberMasked    String?
+  beneficiariesJson             Json?
+  consentDataUsageAccepted      Boolean?
+  consentWearableAccepted       Boolean?
+  consentAiModelingAcknowledged Boolean?
+  consentVersion                String?
+  consentAcceptedAt             DateTime?
+  currentStep                   Int      @default(1)
+  completed                     Boolean  @default(false)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+}
+
+model CaregiverProfessionalProfile {
+  userId              String   @id
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  licenseNumber       String?
+  specialization      String
+  yearsOfExperience   Int
+  assignmentMode      String
+  requestedPatientEmail String?
+  requestedPatientCode String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model CaregiverOnboardingDraft {
+  userId                String   @id
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  licenseNumber         String?
+  specialization        String?
+  yearsOfExperience     Int?
+  assignmentMode        String?
+  requestedPatientEmail String?
+  requestedPatientCode  String?
+  consentHipaaAccepted  Boolean?
+  consentDataAccessAccepted Boolean?
+  consentVersion        String?
+  consentAcceptedAt     DateTime?
+  currentStep           Int      @default(1)
+  completed             Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model StreamingVitals {
+  id          String   @id @default(cuid())
+  patientId   String
+  patient     User     @relation("PatientVitals", fields: [patientId], references: [id], onDelete: Cascade)
+  timestamp   DateTime
+  heartRate   Int
+  stepCount   Int
+  bloodOxygen Int
+  sleepScore  Int
+  createdAt   DateTime @default(now())
+
+  @@index([patientId, timestamp])
+}
+
+model PredictionLog {
+  id                 String        @id @default(cuid())
+  patientId          String
+  patient            User          @relation("PatientPredictionLogs", fields: [patientId], references: [id], onDelete: Cascade)
+  timestamp          DateTime
+  predictedRiskScore Float
+  predictedDisease   PredictedDisease
+  confidence         Float
+  forecastWindow     String
+  predictedTrend     Json
+  riskMomentum       RiskMomentum
+  explainability     Json
+  icdCode            String
+  modelVersion       String
+  createdAt          DateTime      @default(now())
+
+  @@index([patientId, timestamp])
+}
+
+model Beneficiary {
+  id              String          @id @default(cuid())
+  patientId       String
+  patient         User            @relation("PatientBeneficiaries", fields: [patientId], references: [id], onDelete: Cascade)
+  name            String
+  relationship    String
+  email           String
+  phone           String
+  alertPreference AlertPreference
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([patientId])
+}
+
+model CaregiverPatientMapping {
+  id          String   @id @default(cuid())
+  caregiverId String
+  patientId   String
+  caregiver   User     @relation("CaregiverMappings", fields: [caregiverId], references: [id], onDelete: Cascade)
+  patient     User     @relation("PatientMappings", fields: [patientId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([caregiverId, patientId])
+  @@index([caregiverId])
+  @@index([patientId])
+}
+
+model NotificationItem {
+  id           String              @id @default(cuid())
+  userId       String
+  user         User                @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  patientId    String
+  patient      User                @relation("PatientNotificationTargets", fields: [patientId], references: [id], onDelete: Cascade)
+  timestamp    DateTime
+  severity     NotificationSeverity
+  title        String
+  message      String
+  acknowledged Boolean             @default(false)
+  createdAt    DateTime            @default(now())
+
+  @@index([userId, timestamp])
+}
+
+model OutboundNotification {
+  id        String              @id @default(cuid())
+  patientId String
+  patient   User                @relation("PatientOutboundNotifications", fields: [patientId], references: [id], onDelete: Cascade)
+  channel   NotificationChannel
+  recipient String
+  timestamp DateTime
+  payload   String
+  createdAt DateTime            @default(now())
+
+  @@index([patientId, timestamp])
+}
+
+model AuditLogItem {
+  id          String   @id @default(cuid())
+  actorUserId String
+  actor       User     @relation("ActorAuditLogs", fields: [actorUserId], references: [id], onDelete: Cascade)
+  action      String
+  patientId   String?
+  timestamp   DateTime
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([actorUserId, timestamp])
+}
+
+model ConsentLogItem {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation("UserConsentLogs", fields: [userId], references: [id], onDelete: Cascade)
+  role        Role
+  consentType ConsentType
+  version     String
+  acceptedAt  DateTime
+  ipAddress   String
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+
+  @@index([userId, acceptedAt])
+}

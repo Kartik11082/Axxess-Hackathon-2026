@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { store } from "../data/store";
+import { persistBeneficiaries } from "../db/persistentDomain";
 import { canAccessPatient } from "../middleware/access";
 import { requireAuth } from "../middleware/auth";
 import { requireOnboardingComplete } from "../middleware/onboarding";
@@ -61,7 +62,7 @@ patientRoutes.get("/me", requireAuth, requireRole("Patient"), requireOnboardingC
   });
 });
 
-patientRoutes.post("/me/beneficiaries", requireAuth, requireRole("Patient"), requireOnboardingComplete, (req, res) => {
+patientRoutes.post("/me/beneficiaries", requireAuth, requireRole("Patient"), requireOnboardingComplete, async (req, res) => {
   const parsed = beneficiarySchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid beneficiary payload.", details: parsed.error.flatten() });
@@ -72,6 +73,7 @@ patientRoutes.post("/me/beneficiaries", requireAuth, requireRole("Patient"), req
     patientId: req.auth!.userId,
     ...parsed.data
   });
+  await persistBeneficiaries(req.auth!.userId);
 
   res.status(201).json({ message: "Beneficiary added." });
 });

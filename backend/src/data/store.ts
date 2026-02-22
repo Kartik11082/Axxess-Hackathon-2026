@@ -229,6 +229,59 @@ function createUser(params: { name: string; email: string; role: "Patient" | "Ca
   return user;
 }
 
+function upsertUser(user: User): User {
+  const existingById = users.find((item) => item.id === user.id);
+  if (existingById) {
+    existingById.name = user.name;
+    existingById.email = user.email;
+    existingById.role = user.role;
+    existingById.onboardingCompleted = user.onboardingCompleted;
+    existingById.patientCode = user.patientCode;
+    existingById.passwordHash = user.passwordHash;
+    return existingById;
+  }
+
+  const existingByEmail = users.find((item) => item.email.toLowerCase() === user.email.toLowerCase());
+  if (existingByEmail) {
+    existingByEmail.id = user.id;
+    existingByEmail.name = user.name;
+    existingByEmail.role = user.role;
+    existingByEmail.onboardingCompleted = user.onboardingCompleted;
+    existingByEmail.patientCode = user.patientCode;
+    existingByEmail.passwordHash = user.passwordHash;
+    return existingByEmail;
+  }
+
+  users.push({ ...user });
+
+  if (user.role === "Patient") {
+    if (!patientProfiles.has(user.id)) {
+      patientProfiles.set(user.id, {
+        userId: user.id,
+        basicInfo: null,
+        onboardingResponses: null,
+        insurance: null,
+        predictedDisease: "Stable",
+        initialRiskConfidence: "Low",
+        riskScore: 0.2,
+        wearableData: [],
+        insuranceIdMasked: ""
+      });
+    }
+    if (!patientOnboardingDrafts.has(user.id)) {
+      patientOnboardingDrafts.set(user.id, emptyPatientOnboardingDraft(user.id));
+    }
+  }
+
+  if (user.role === "Caregiver") {
+    if (!caregiverOnboardingDrafts.has(user.id)) {
+      caregiverOnboardingDrafts.set(user.id, emptyCaregiverOnboardingDraft(user.id));
+    }
+  }
+
+  return user;
+}
+
 function listPatients(): User[] {
   return users.filter((user) => user.role === "Patient");
 }
@@ -365,6 +418,22 @@ function upsertCaregiverOnboardingDraft(
   return next;
 }
 
+function setPatientOnboardingDraft(draft: PatientOnboardingDraft): void {
+  patientOnboardingDrafts.set(draft.userId, {
+    ...draft,
+    beneficiaries: draft.beneficiaries.map((entry) => ({ ...entry })),
+    updatedAt: draft.updatedAt
+  });
+}
+
+function setCaregiverOnboardingDraft(draft: CaregiverOnboardingDraft): void {
+  caregiverOnboardingDrafts.set(draft.userId, {
+    ...draft,
+    professionalProfile: draft.professionalProfile ? { ...draft.professionalProfile } : null,
+    consent: draft.consent ? { ...draft.consent } : null
+  });
+}
+
 function completeCaregiverOnboarding(params: {
   userId: string;
   profile: CaregiverProfessionalProfile;
@@ -390,6 +459,10 @@ function getCaregiverProfile(caregiverId: string): CaregiverProfessionalProfile 
   return caregiverProfiles.get(caregiverId);
 }
 
+function upsertCaregiverProfile(profile: CaregiverProfessionalProfile): void {
+  caregiverProfiles.set(profile.userId, { ...profile });
+}
+
 function addConsentLog(entry: Omit<ConsentLogItem, "id">): ConsentLogItem {
   const log: ConsentLogItem = {
     id: uuidv4(),
@@ -405,6 +478,13 @@ function listConsentLogs(userId: string): ConsentLogItem[] {
 
 function getPatientProfile(patientId: string): PatientProfile | undefined {
   return patientProfiles.get(patientId);
+}
+
+function upsertPatientProfile(profile: PatientProfile): void {
+  patientProfiles.set(profile.userId, {
+    ...profile,
+    wearableData: [...profile.wearableData]
+  });
 }
 
 function setPatientRisk(patientId: string, predictedDisease: PredictedDisease, riskScore: number): void {
@@ -441,6 +521,13 @@ function getCaregiverIdsByPatient(patientId: string): string[] {
     .map((mapping) => mapping.caregiverId);
 }
 
+function listCaregiverMappings(): CaregiverPatientMapping[] {
+  return caregiverPatientMappings.map((mapping) => ({
+    caregiverId: mapping.caregiverId,
+    patientId: mapping.patientId
+  }));
+}
+
 function addBeneficiary(beneficiary: Beneficiary): void {
   beneficiaries.push(beneficiary);
 }
@@ -455,6 +542,10 @@ function getBeneficiariesByPatient(patientId: string): Beneficiary[] {
   return beneficiaries.filter((beneficiary) => beneficiary.patientId === patientId);
 }
 
+function listBeneficiaries(): Beneficiary[] {
+  return beneficiaries.map((beneficiary) => ({ ...beneficiary }));
+}
+
 function appendVitals(vitals: StreamingVitals): void {
   const current = vitalsByPatient.get(vitals.patientId) ?? [];
   current.push(vitals);
@@ -462,6 +553,19 @@ function appendVitals(vitals: StreamingVitals): void {
   vitalsByPatient.set(vitals.patientId, bounded);
 
   const profile = patientProfiles.get(vitals.patientId);
+  if (profile) {
+    profile.wearableData = bounded.slice(-250);
+  }
+}
+
+function setVitalsHistory(patientId: string, vitals: StreamingVitals[]): void {
+  const sorted = [...vitals].sort(
+    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
+  );
+  const bounded = sorted.slice(-1200);
+  vitalsByPatient.set(patientId, bounded);
+
+  const profile = patientProfiles.get(patientId);
   if (profile) {
     profile.wearableData = bounded.slice(-250);
   }
@@ -490,6 +594,13 @@ function getPredictionLogs(patientId: string): PredictionLog[] {
 function getLatestPrediction(patientId: string): PredictionLog | undefined {
   const items = predictionLogsByPatient.get(patientId) ?? [];
   return items[items.length - 1];
+}
+
+function setPredictionLogs(patientId: string, logs: PredictionLog[]): void {
+  const sorted = [...logs].sort(
+    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
+  );
+  predictionLogsByPatient.set(patientId, sorted.slice(-300));
 }
 
 function addNotification(notification: Omit<NotificationItem, "id" | "timestamp" | "acknowledged">): NotificationItem {
@@ -550,32 +661,41 @@ export const store = {
   getUserById,
   getUserByPatientCode,
   createUser,
+  upsertUser,
   listPatients,
   getOnboardingStatus,
   getPatientOnboardingDraft,
   upsertPatientOnboardingDraft,
+  setPatientOnboardingDraft,
   completePatientOnboarding,
   getCaregiverOnboardingDraft,
   upsertCaregiverOnboardingDraft,
+  setCaregiverOnboardingDraft,
   completeCaregiverOnboarding,
   getCaregiverProfile,
+  upsertCaregiverProfile,
   addConsentLog,
   listConsentLogs,
   setOnboardingResponses,
   getPatientProfile,
+  upsertPatientProfile,
   setPatientRisk,
   addCaregiverMapping,
   getCaregiverPatientIds,
   getCaregiverIdsByPatient,
+  listCaregiverMappings,
   addBeneficiary,
   replaceBeneficiaries,
   getBeneficiariesByPatient,
+  listBeneficiaries,
   appendVitals,
+  setVitalsHistory,
   getLatestVitals,
   getVitalsSince,
   addPredictionLog,
   getPredictionLogs,
   getLatestPrediction,
+  setPredictionLogs,
   addNotification,
   listNotifications,
   acknowledgeNotification,

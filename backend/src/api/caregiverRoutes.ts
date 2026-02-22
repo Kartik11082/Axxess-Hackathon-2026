@@ -6,6 +6,7 @@ import { requireOnboardingComplete } from "../middleware/onboarding";
 import { requireRole } from "../middleware/role";
 import { logCaregiverAction } from "../services/auditService";
 import { buildCaregiverPriorityList } from "../services/predictionService";
+import { persistCaregiverMapping } from "../db/persistentMappings";
 
 const mappingSchema = z.object({
   patientId: z.string().min(3)
@@ -98,7 +99,7 @@ caregiverRoutes.get("/patients/:patientId", (req, res) => {
   });
 });
 
-caregiverRoutes.post("/mappings", (req, res) => {
+caregiverRoutes.post("/mappings", async (req, res) => {
   const parsed = mappingSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid mapping payload.", details: parsed.error.flatten() });
@@ -114,6 +115,7 @@ caregiverRoutes.post("/mappings", (req, res) => {
   }
 
   store.addCaregiverMapping(caregiverId, parsed.data.patientId);
+  await persistCaregiverMapping(caregiverId, parsed.data.patientId);
   logCaregiverAction({
     caregiverId,
     patientId: parsed.data.patientId,

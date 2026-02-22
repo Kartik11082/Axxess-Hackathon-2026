@@ -3,6 +3,10 @@ import express from "express";
 import http from "http";
 import { apiRouter } from "./api";
 import { config } from "./config";
+import { initializePersistentDomainData } from "./db/persistentDomain";
+import { prisma } from "./db/prisma";
+import { initializePersistentMappings } from "./db/persistentMappings";
+import { initializePersistentUsers } from "./db/persistentUsers";
 import { StreamingEngine } from "./engine/streamingEngine";
 
 const app = express();
@@ -30,16 +34,29 @@ app.use((req, res, next) => {
 app.use("/api", apiRouter);
 
 const streamingEngine = new StreamingEngine(server);
-streamingEngine.start();
 
-server.listen(config.port, () => {
+async function startServer(): Promise<void> {
+  await initializePersistentUsers();
+  await initializePersistentMappings();
+  await initializePersistentDomainData();
+  streamingEngine.start();
+
+  server.listen(config.port, () => {
+    // eslint-disable-next-line no-console
+    console.log(`Backend listening on http://localhost:${config.port}`);
+    // eslint-disable-next-line no-console
+    console.log(`WebSocket endpoint ws://localhost:${config.port}/ws`);
+  });
+}
+
+startServer().catch((error) => {
   // eslint-disable-next-line no-console
-  console.log(`Backend listening on http://localhost:${config.port}`);
-  // eslint-disable-next-line no-console
-  console.log(`WebSocket endpoint ws://localhost:${config.port}/ws`);
+  console.error("Failed to start backend:", error);
+  process.exit(1);
 });
 
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
   streamingEngine.stop();
+  await prisma?.$disconnect().catch(() => undefined);
   server.close(() => process.exit(0));
 });

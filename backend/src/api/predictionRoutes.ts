@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { store } from "../data/store";
+import { persistStreamingVitals } from "../db/persistentDomain";
 import { canAccessPatient } from "../middleware/access";
 import { requireAuth } from "../middleware/auth";
 import { requireOnboardingComplete } from "../middleware/onboarding";
@@ -22,7 +23,7 @@ const predictRiskSchema = z.object({
 
 export const predictionRoutes = Router();
 
-predictionRoutes.post("/predict-risk", requireAuth, requireOnboardingComplete, (req, res) => {
+predictionRoutes.post("/predict-risk", requireAuth, requireOnboardingComplete, async (req, res) => {
   const parsed = predictRiskSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid prediction payload.", details: parsed.error.flatten() });
@@ -42,15 +43,17 @@ predictionRoutes.post("/predict-risk", requireAuth, requireOnboardingComplete, (
     }
   }
 
-  const prediction = runAndPersistPrediction({
+  const prediction = await runAndPersistPrediction({
     patientId,
     vitals: samples,
     shouldNotify: true
   });
 
-  for (const sample of samples.slice(-5)) {
+  const latestSamples = samples.slice(-5);
+  for (const sample of latestSamples) {
     store.appendVitals(sample);
   }
+  await Promise.all(latestSamples.map((sample) => persistStreamingVitals(sample)));
 
   res.json(prediction);
 });

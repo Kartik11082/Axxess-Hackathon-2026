@@ -2,7 +2,7 @@
 
 ## 1) Overview
 
-The backend is a TypeScript Node.js service using Express for REST APIs and `ws` for real-time streaming.  
+The backend is a TypeScript Node.js service using Express for REST APIs, `ws` for real-time streaming, and Prisma/SQLite for SQL persistence.  
 It implements:
 
 - JWT-based authentication and role authorization (`Patient`, `Caregiver`)
@@ -41,7 +41,8 @@ Primary entrypoint: `backend/src/server.ts`.
 
 ## 4) Data Layer and Models
 
-Storage is in-memory (no database), implemented in `backend/src/data/store.ts`.  
+Primary runtime storage is still in-memory, implemented in `backend/src/data/store.ts`.  
+SQLite schema is defined in `backend/prisma/schema.prisma` and seeded via `backend/prisma/seed.js`.
 Main entity sets:
 
 - `users` (seeded patient/caregiver accounts)
@@ -251,8 +252,23 @@ Core variables:
 
 ## 12) Current Limits and Production Gaps
 
-- In-memory storage only (data resets on restart)
+- Most runtime operations are still in-memory; SQL persistence is prepared in SQLite via Prisma models.
 - No refresh token rotation/session revocation store
 - No external message bus/email/SMS provider integration
 - No formal rate limiting, tracing, or persistence-level encryption
 - Prediction model is heuristic/mock, not diagnostic or clinically validated
+
+## 13) SQLite Model Layer (New)
+
+SQLite models now exist for core in-memory entities (users, profiles, onboarding drafts, vitals, predictions, beneficiaries, mappings, notifications, logs) via Prisma:
+
+- Prisma schema: `backend/prisma/schema.prisma`
+- Prisma client: `backend/src/db/prisma.ts`
+- Mapping bootstrap + upsert: `backend/src/db/persistentMappings.ts`
+- Seed script for demo data: `backend/prisma/seed.js`
+- Boot-time DB hydration into runtime store: `backend/src/server.ts`
+- Write-through persistence when mapping is created:
+  - `POST /api/caregiver/mappings`
+  - caregiver onboarding completion flow
+
+This provides a concrete SQL model foundation while existing service behavior remains compatible with in-memory runtime state.

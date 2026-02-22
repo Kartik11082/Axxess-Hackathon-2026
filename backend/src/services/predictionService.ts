@@ -1,4 +1,5 @@
 import { store } from "../data/store";
+import { persistPatientProfile, persistPredictionLog } from "../db/persistentDomain";
 import { CaregiverPriorityItem, PredictionLog, PredictionResponse, StreamingVitals } from "../models/types";
 import { evaluateAndSendRiskNotifications } from "./notificationService";
 import { runPredictionModel } from "./riskModel";
@@ -19,11 +20,11 @@ function toPredictionLog(prediction: PredictionResponse): PredictionLog {
   };
 }
 
-export function runAndPersistPrediction(params: {
+export async function runAndPersistPrediction(params: {
   patientId: string;
   vitals: StreamingVitals[];
   shouldNotify: boolean;
-}): PredictionResponse {
+}): Promise<PredictionResponse> {
   const previousPrediction = store.getLatestPrediction(params.patientId);
   const prediction = runPredictionModel({
     patientId: params.patientId,
@@ -31,8 +32,10 @@ export function runAndPersistPrediction(params: {
     previousPrediction
   });
 
-  store.addPredictionLog(toPredictionLog(prediction));
+  const log = toPredictionLog(prediction);
+  store.addPredictionLog(log);
   store.setPatientRisk(params.patientId, prediction.predictedDisease, prediction.predictedRiskScore);
+  await Promise.all([persistPredictionLog(log), persistPatientProfile(params.patientId)]);
 
   if (params.shouldNotify) {
     evaluateAndSendRiskNotifications({

@@ -206,6 +206,8 @@ button.ghost {
   display: flex;
   align-items: center;
   gap: 0.7rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .status-chip {
@@ -215,6 +217,41 @@ button.ghost {
   border: 1px solid rgba(0, 179, 138, 0.32);
   padding: 0.34rem 0.64rem;
   font-size: 0.82rem;
+}
+
+.id-button {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.add-patient-shell {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.add-patient-inline {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.add-patient-inline input {
+  min-width: 170px;
+  height: 36px;
+}
+
+.add-patient-inline button {
+  height: 36px;
+  padding: 0.35rem 0.72rem;
+}
+
+.header-note {
+  font-size: 0.74rem;
+  color: #0d6fc4;
+}
+
+.header-note-error {
+  color: #d64545;
 }
 
 .risk-headline {
@@ -603,6 +640,21 @@ button.ghost {
   .app-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .add-patient-inline {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .add-patient-inline input {
+    min-width: 0;
+    width: 100%;
   }
 
   .risk-headline {

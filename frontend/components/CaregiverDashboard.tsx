@@ -49,6 +49,7 @@ interface InsuranceResponse {
 export function CaregiverDashboard() {
   const router = useRouter();
   const [caregiverName, setCaregiverName] = useState("Caregiver");
+  const [caregiverId, setCaregiverId] = useState("");
   const [prioritized, setPrioritized] = useState<CaregiverPriorityItem[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string>("");
   const [selectedPatientName, setSelectedPatientName] = useState<string>("Patient");
@@ -84,6 +85,12 @@ export function CaregiverDashboard() {
     );
   }, []);
 
+  const refreshPatientList = useCallback(async (): Promise<CaregiverPatientsResponse> => {
+    const patients = await apiRequest<CaregiverPatientsResponse>("/api/caregiver/patients");
+    setPrioritized(patients.prioritizedAlerts);
+    return patients;
+  }, []);
+
   useEffect(() => {
     const user = getUser();
     if (!user || user.role !== "Caregiver") {
@@ -91,14 +98,14 @@ export function CaregiverDashboard() {
       return;
     }
     setCaregiverName(user.name);
+    setCaregiverId(user.id);
 
     const load = async () => {
       try {
         const [patients, alerts] = await Promise.all([
-          apiRequest<CaregiverPatientsResponse>("/api/caregiver/patients"),
+          refreshPatientList(),
           apiRequest<NotificationsResponse>("/api/notifications")
         ]);
-        setPrioritized(patients.prioritizedAlerts);
         setNotifications(alerts.notifications);
 
         const firstPatientId = patients.prioritizedAlerts[0]?.patientId ?? patients.patients[0]?.id ?? "";
@@ -118,7 +125,18 @@ export function CaregiverDashboard() {
       clearSession();
       router.replace("/");
     });
-  }, [loadPatientDetails, router]);
+  }, [loadPatientDetails, refreshPatientList, router]);
+
+  const onPatientMapped = useCallback(async () => {
+    const patients = await refreshPatientList();
+    if (!selectedPatientId) {
+      const firstPatientId = patients.prioritizedAlerts[0]?.patientId ?? patients.patients[0]?.id ?? "";
+      if (firstPatientId) {
+        setSelectedPatientId(firstPatientId);
+        await loadPatientDetails(firstPatientId);
+      }
+    }
+  }, [loadPatientDetails, refreshPatientList, selectedPatientId]);
 
   useEffect(() => {
     if (!selectedPatientId) {
@@ -168,6 +186,9 @@ export function CaregiverDashboard() {
         title={`${caregiverName} Command Center`}
         subtitle="Caregiver Operations Layer"
         status={selectedPatientId ? `Monitoring ${selectedPatientName}` : "No active patient selected"}
+        userId={caregiverId}
+        showAddPatientControl
+        onPatientMapped={onPatientMapped}
       />
 
       <section className="dashboard-grid single-column">

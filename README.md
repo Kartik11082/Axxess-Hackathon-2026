@@ -11,7 +11,8 @@ Full-stack mock implementation of a role-based healthcare monitoring platform wi
 ## Stack
 
 - Frontend: Next.js (App Router) + Recharts
-- Backend: Node.js + Express + `ws`
+- Backend: Node.js + Express + `ws` + Prisma
+- Database: SQLite (schema now includes all in-memory entities)
 - Data: In-memory models (mock-ready structure)
 - Auth: JWT with role-based route enforcement
 
@@ -121,6 +122,34 @@ Base URL: `http://localhost:4000/api`
    - Frontend: `http://localhost:3000`
    - Backend health: `http://localhost:4000/api/health`
 
+## Login Troubleshooting (`Failed to fetch`)
+
+If login shows `Failed to fetch`, backend is usually not running or Prisma is not initialized.
+
+Run in order:
+
+1. `npm run db:generate --workspace backend`
+2. `npm run db:push --workspace backend`
+3. `npm run db:seed --workspace backend`
+4. `npm run dev:backend`
+5. Verify health in browser: `http://localhost:4000/api/health`
+6. Then run frontend: `npm run dev:frontend`
+
+## Database Setup (Persistent Mapping)
+
+From repo root:
+
+1. Ensure `DATABASE_URL` in `backend/.env` is:
+   - `DATABASE_URL=file:./dev.db`
+2. Install deps:
+   - `npm install`
+3. Generate Prisma client:
+   - `npm run db:generate --workspace backend`
+4. Create/apply schema:
+   - `npm run db:push --workspace backend`
+5. Seed demo users/data:
+   - `npm run db:seed --workspace backend`
+
 ## Demo Credentials
 
 - Patient: `patient1@demo.com` / `Password123!`
@@ -129,6 +158,7 @@ Base URL: `http://localhost:4000/api`
 
 ## Notes
 
-- Data is in-memory and resets on backend restart.
+- Runtime still uses in-memory service objects for most operations.
+- SQLite now holds the SQL model for all core entities and is seeded with demo records.
 - Prediction engine is heuristic and non-diagnostic by design.
 - Notification channels are mocked (email/SMS entries are logged internally).

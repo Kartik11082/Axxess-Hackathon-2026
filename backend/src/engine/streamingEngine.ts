@@ -2,6 +2,7 @@ import { Server as HttpServer } from "http";
 import WebSocket, { Server as WebSocketServer } from "ws";
 import { config } from "../config";
 import { store } from "../data/store";
+import { persistStreamingVitals } from "../db/persistentDomain";
 import { verifyToken } from "../auth/jwt";
 import { AuthTokenPayload, StreamingVitals } from "../models/types";
 import { runAndPersistPrediction } from "../services/predictionService";
@@ -93,7 +94,7 @@ export class StreamingEngine {
     }
 
     this.predictionTimer = setInterval(() => {
-      this.runScheduledPredictions();
+      void this.runScheduledPredictions();
     }, config.predictionRunIntervalMs);
   }
 
@@ -177,6 +178,7 @@ export class StreamingEngine {
       const previous = store.getLatestVitals(patientId);
       const nextVitals = generateVitals(patientId, previous);
       store.appendVitals(nextVitals);
+      void persistStreamingVitals(nextVitals);
       this.broadcastVitals(nextVitals);
 
       const delay = randomBetween(config.streamMinIntervalMs, config.streamMaxIntervalMs);
@@ -229,7 +231,7 @@ export class StreamingEngine {
     }
   }
 
-  private runScheduledPredictions(): void {
+  private async runScheduledPredictions(): Promise<void> {
     const since = minutesAgoIso(config.predictionWindowMinutes);
     const patients = store.listPatients();
 
@@ -239,7 +241,7 @@ export class StreamingEngine {
         continue;
       }
 
-      const prediction = runAndPersistPrediction({
+      const prediction = await runAndPersistPrediction({
         patientId: patient.id,
         vitals: windowVitals,
         shouldNotify: true

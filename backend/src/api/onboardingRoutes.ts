@@ -1,6 +1,15 @@
 import { Router } from "express";
 import { z } from "zod";
 import { store } from "../data/store";
+import {
+  persistBeneficiaries,
+  persistCaregiverOnboardingDraft,
+  persistCaregiverProfile,
+  persistPatientOnboardingDraft,
+  persistPatientProfile
+} from "../db/persistentDomain";
+import { persistCaregiverMapping } from "../db/persistentMappings";
+import { persistUser } from "../db/persistentUsers";
 import { requireAuth } from "../middleware/auth";
 import { requireRole } from "../middleware/role";
 import { calculateInitialRiskAssessment } from "../services/riskModel";
@@ -103,7 +112,7 @@ onboardingRoutes.get("/patient/draft", requireAuth, requireRole("Patient"), (req
   });
 });
 
-onboardingRoutes.put("/patient/basic-info", requireAuth, requireRole("Patient"), (req, res) => {
+onboardingRoutes.put("/patient/basic-info", requireAuth, requireRole("Patient"), async (req, res) => {
   const parsed = basicInfoSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid basic info payload.", details: parsed.error.flatten() });
@@ -114,6 +123,7 @@ onboardingRoutes.put("/patient/basic-info", requireAuth, requireRole("Patient"),
     basicInfo: parsed.data,
     currentStep: 1
   });
+  await persistPatientOnboardingDraft(req.auth!.userId);
 
   res.json({
     draft: sanitizePatientDraftForClient(req.auth!.userId),
@@ -121,7 +131,7 @@ onboardingRoutes.put("/patient/basic-info", requireAuth, requireRole("Patient"),
   });
 });
 
-onboardingRoutes.put("/patient/behavioral", requireAuth, requireRole("Patient"), (req, res) => {
+onboardingRoutes.put("/patient/behavioral", requireAuth, requireRole("Patient"), async (req, res) => {
   const parsed = behavioralSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid behavioral response payload.", details: parsed.error.flatten() });
@@ -132,6 +142,7 @@ onboardingRoutes.put("/patient/behavioral", requireAuth, requireRole("Patient"),
     behavioralResponses: parsed.data,
     currentStep: 2
   });
+  await persistPatientOnboardingDraft(req.auth!.userId);
 
   res.json({
     draft: sanitizePatientDraftForClient(req.auth!.userId),
@@ -139,7 +150,7 @@ onboardingRoutes.put("/patient/behavioral", requireAuth, requireRole("Patient"),
   });
 });
 
-onboardingRoutes.put("/patient/insurance", requireAuth, requireRole("Patient"), (req, res) => {
+onboardingRoutes.put("/patient/insurance", requireAuth, requireRole("Patient"), async (req, res) => {
   const parsed = insuranceSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid insurance payload.", details: parsed.error.flatten() });
@@ -162,6 +173,7 @@ onboardingRoutes.put("/patient/insurance", requireAuth, requireRole("Patient"), 
     insurance,
     currentStep: 3
   });
+  await persistPatientOnboardingDraft(req.auth!.userId);
 
   res.json({
     draft: sanitizePatientDraftForClient(req.auth!.userId),
@@ -169,7 +181,7 @@ onboardingRoutes.put("/patient/insurance", requireAuth, requireRole("Patient"), 
   });
 });
 
-onboardingRoutes.put("/patient/beneficiaries", requireAuth, requireRole("Patient"), (req, res) => {
+onboardingRoutes.put("/patient/beneficiaries", requireAuth, requireRole("Patient"), async (req, res) => {
   const parsed = z.array(beneficiarySchema).max(6).safeParse(req.body?.beneficiaries ?? []);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid beneficiary payload.", details: parsed.error.flatten() });
@@ -185,6 +197,7 @@ onboardingRoutes.put("/patient/beneficiaries", requireAuth, requireRole("Patient
     beneficiaries,
     currentStep: 4
   });
+  await persistPatientOnboardingDraft(req.auth!.userId);
 
   res.json({
     draft: sanitizePatientDraftForClient(req.auth!.userId),
@@ -192,7 +205,7 @@ onboardingRoutes.put("/patient/beneficiaries", requireAuth, requireRole("Patient
   });
 });
 
-onboardingRoutes.put("/patient/consent", requireAuth, requireRole("Patient"), (req, res) => {
+onboardingRoutes.put("/patient/consent", requireAuth, requireRole("Patient"), async (req, res) => {
   const parsed = patientConsentSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid patient consent payload.", details: parsed.error.flatten() });
@@ -205,9 +218,10 @@ onboardingRoutes.put("/patient/consent", requireAuth, requireRole("Patient"), (r
       acceptedAt: parsed.data.dataUsageAccepted && parsed.data.wearableConsentAccepted && parsed.data.aiModelingAcknowledged
         ? nowIso()
         : undefined
-    },
+      },
     currentStep: 5
   });
+  await persistPatientOnboardingDraft(req.auth!.userId);
 
   res.json({
     draft: sanitizePatientDraftForClient(req.auth!.userId),
@@ -215,7 +229,7 @@ onboardingRoutes.put("/patient/consent", requireAuth, requireRole("Patient"), (r
   });
 });
 
-onboardingRoutes.post("/patient/complete", requireAuth, requireRole("Patient"), (req, res) => {
+onboardingRoutes.post("/patient/complete", requireAuth, requireRole("Patient"), async (req, res) => {
   const userId = req.auth!.userId;
   const draft = store.getPatientOnboardingDraft(userId);
 
@@ -259,6 +273,17 @@ onboardingRoutes.post("/patient/complete", requireAuth, requireRole("Patient"), 
       aiModelingAcknowledged: draft.consent.aiModelingAcknowledged
     }
   });
+  await Promise.all([
+    persistPatientProfile(userId),
+    persistBeneficiaries(userId),
+    persistPatientOnboardingDraft(userId),
+    (async () => {
+      const user = store.getUserById(userId);
+      if (user) {
+        await persistUser(user);
+      }
+    })()
+  ]);
 
   res.json({
     baselineRiskScore: assessment.baselineRiskScore,
@@ -284,7 +309,7 @@ onboardingRoutes.get("/caregiver/draft", requireAuth, requireRole("Caregiver"), 
   });
 });
 
-onboardingRoutes.put("/caregiver/professional", requireAuth, requireRole("Caregiver"), (req, res) => {
+onboardingRoutes.put("/caregiver/professional", requireAuth, requireRole("Caregiver"), async (req, res) => {
   const parsed = caregiverProfessionalSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid professional profile payload.", details: parsed.error.flatten() });
@@ -304,6 +329,7 @@ onboardingRoutes.put("/caregiver/professional", requireAuth, requireRole("Caregi
     },
     currentStep: 1
   });
+  await persistCaregiverOnboardingDraft(req.auth!.userId);
 
   res.json({
     draft,
@@ -311,7 +337,7 @@ onboardingRoutes.put("/caregiver/professional", requireAuth, requireRole("Caregi
   });
 });
 
-onboardingRoutes.put("/caregiver/assignment", requireAuth, requireRole("Caregiver"), (req, res) => {
+onboardingRoutes.put("/caregiver/assignment", requireAuth, requireRole("Caregiver"), async (req, res) => {
   const parsed = caregiverAssignmentSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid assignment payload.", details: parsed.error.flatten() });
@@ -335,6 +361,7 @@ onboardingRoutes.put("/caregiver/assignment", requireAuth, requireRole("Caregive
     },
     currentStep: 2
   });
+  await persistCaregiverOnboardingDraft(req.auth!.userId);
 
   res.json({
     draft,
@@ -342,7 +369,7 @@ onboardingRoutes.put("/caregiver/assignment", requireAuth, requireRole("Caregive
   });
 });
 
-onboardingRoutes.put("/caregiver/consent", requireAuth, requireRole("Caregiver"), (req, res) => {
+onboardingRoutes.put("/caregiver/consent", requireAuth, requireRole("Caregiver"), async (req, res) => {
   const parsed = caregiverConsentSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid caregiver consent payload.", details: parsed.error.flatten() });
@@ -356,6 +383,7 @@ onboardingRoutes.put("/caregiver/consent", requireAuth, requireRole("Caregiver")
     },
     currentStep: 3
   });
+  await persistCaregiverOnboardingDraft(req.auth!.userId);
 
   res.json({
     draft,
@@ -363,7 +391,7 @@ onboardingRoutes.put("/caregiver/consent", requireAuth, requireRole("Caregiver")
   });
 });
 
-onboardingRoutes.post("/caregiver/complete", requireAuth, requireRole("Caregiver"), (req, res) => {
+onboardingRoutes.post("/caregiver/complete", requireAuth, requireRole("Caregiver"), async (req, res) => {
   const userId = req.auth!.userId;
   const draft = store.getCaregiverOnboardingDraft(userId);
 
@@ -390,6 +418,7 @@ onboardingRoutes.post("/caregiver/complete", requireAuth, requireRole("Caregiver
     const patient = patientByEmail ?? patientByCode;
     if (patient && patient.role === "Patient") {
       store.addCaregiverMapping(userId, patient.id);
+      await persistCaregiverMapping(userId, patient.id);
       mappedPatientId = patient.id;
     }
   }
@@ -412,6 +441,16 @@ onboardingRoutes.post("/caregiver/complete", requireAuth, requireRole("Caregiver
       assignmentMode: draft.professionalProfile.assignmentMode
     }
   });
+  await Promise.all([
+    persistCaregiverProfile(userId),
+    persistCaregiverOnboardingDraft(userId),
+    (async () => {
+      const user = store.getUserById(userId);
+      if (user) {
+        await persistUser(user);
+      }
+    })()
+  ]);
 
   res.json({
     message: "Caregiver onboarding completed successfully.",

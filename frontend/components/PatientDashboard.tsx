@@ -176,6 +176,7 @@ export function PatientDashboard() {
         title={`${patientName} Monitoring Console`}
         subtitle="Patient Experience Layer"
         status={latestVitals ? "Streaming active" : "Awaiting stream"}
+        userId={patientId}
       />
 
       <section className="risk-headline">
